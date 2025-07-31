@@ -40,6 +40,7 @@ mod fuzzy_search;
 mod files_correction;
 mod vecdb;
 mod ast;
+mod codegraph;
 mod subchat;
 mod at_commands;
 mod tools;
