@@ -168,236 +168,416 @@ impl CodeParser {
         use crate::ast::treesitter::ast_instance_structs::FunctionDeclaration;
         use crate::ast::treesitter::language_id::LanguageId;
         
+        // 首先检查是否为函数声明
+        if symbol.symbol_type() != crate::ast::treesitter::structs::SymbolType::FunctionDeclaration {
+            return None;
+        }
+        
         // 尝试将symbol转换为FunctionDeclaration
-        if let Some(func_decl) = symbol.as_any().downcast_ref::<FunctionDeclaration>() {
-            let mut signature = String::new();
-            
-            // 根据语言类型构建不同的签名格式
-            match symbol.language() {
-                LanguageId::Rust => {
-                    // Rust: fn name<T>(param1: Type1, param2: Type2) -> ReturnType
-                    signature.push_str("fn ");
-                    signature.push_str(symbol.name());
-                    
-                    // 添加模板参数
-                    if !func_decl.template_types.is_empty() {
-                        signature.push('<');
-                        let template_names: Vec<String> = func_decl.template_types.iter()
-                            .map(|t| t.to_string())
-                            .collect();
-                        signature.push_str(&template_names.join(", "));
-                        signature.push('>');
-                    }
-                    
-                    // 添加参数
-                    signature.push('(');
-                    let param_signatures: Vec<String> = func_decl.args.iter()
-                        .map(|arg| {
-                            let mut param = String::new();
-                            if !arg.name.is_empty() {
-                                param.push_str(&arg.name);
-                                param.push_str(": ");
-                            }
-                            if let Some(ref type_def) = arg.type_ {
-                                param.push_str(&type_def.to_string());
-                            } else {
-                                param.push_str("_");
-                            }
-                            param
-                        })
-                        .collect();
-                    signature.push_str(&param_signatures.join(", "));
-                    signature.push(')');
-                    
-                    // 添加返回类型
-                    if let Some(ref return_type) = func_decl.return_type {
-                        signature.push_str(" -> ");
-                        signature.push_str(&return_type.to_string());
-                    }
+        let func_decl = match symbol.as_any().downcast_ref::<FunctionDeclaration>() {
+            Some(decl) => decl,
+            None => {
+                // 如果无法转换为FunctionDeclaration，尝试构建基本签名
+                return self._build_basic_signature(symbol);
+            }
+        };
+        
+        // 使用新的完整签名构建方法
+        let signature = self._build_complete_signature(symbol, func_decl);
+        Some(signature)
+    }
+    
+    /// 构建基本签名（当无法转换为FunctionDeclaration时使用）
+    fn _build_basic_signature(&self, symbol: &dyn crate::ast::treesitter::ast_instance_structs::AstSymbolInstance) -> Option<String> {
+        let mut signature = String::new();
+        
+        // 根据语言添加适当的关键字
+        match symbol.language() {
+            crate::ast::treesitter::language_id::LanguageId::Rust => signature.push_str("fn "),
+            crate::ast::treesitter::language_id::LanguageId::Python => signature.push_str("def "),
+            crate::ast::treesitter::language_id::LanguageId::JavaScript | 
+            crate::ast::treesitter::language_id::LanguageId::TypeScript | 
+            crate::ast::treesitter::language_id::LanguageId::TypeScriptReact => signature.push_str("function "),
+            crate::ast::treesitter::language_id::LanguageId::Go => signature.push_str("func "),
+            _ => {}
+        }
+        
+        // 函数名
+        signature.push_str(symbol.name());
+        signature.push_str("(...)");
+        
+        Some(signature)
+    }
+
+    /// 安全地获取类型名称
+    fn _safe_type_name(&self, type_def: &crate::ast::treesitter::ast_instance_structs::TypeDef) -> String {
+        if let Some(name) = &type_def.name {
+            name.clone()
+        } else if let Some(inference_info) = &type_def.inference_info {
+            inference_info.clone()
+        } else {
+            "unknown".to_string()
+        }
+    }
+
+    /// 安全地构建参数签名
+    fn _build_param_signature(&self, arg: &crate::ast::treesitter::ast_instance_structs::FunctionArg, 
+                             language: &crate::ast::treesitter::language_id::LanguageId) -> String {
+        let mut param = String::new();
+        
+        match language {
+            crate::ast::treesitter::language_id::LanguageId::Rust => {
+                // Rust: name: Type
+                if !arg.name.is_empty() {
+                    param.push_str(&arg.name);
+                    param.push_str(": ");
                 }
-                
-                LanguageId::Cpp | LanguageId::C => {
-                    // C/C++: ReturnType name<T>(Type1 param1, Type2 param2)
-                    if let Some(ref return_type) = func_decl.return_type {
-                        signature.push_str(&return_type.to_string());
-                        signature.push(' ');
-                    } else {
-                        signature.push_str("void ");
-                    }
-                    
-                    signature.push_str(symbol.name());
-                    
-                    // 添加模板参数
-                    if !func_decl.template_types.is_empty() {
-                        signature.push('<');
-                        let template_names: Vec<String> = func_decl.template_types.iter()
-                            .map(|t| t.to_string())
-                            .collect();
-                        signature.push_str(&template_names.join(", "));
-                        signature.push('>');
-                    }
-                    
-                    // 添加参数
-                    signature.push('(');
-                    let param_signatures: Vec<String> = func_decl.args.iter()
-                        .map(|arg| {
-                            let mut param = String::new();
-                            if let Some(ref type_def) = arg.type_ {
-                                param.push_str(&type_def.to_string());
-                                if !arg.name.is_empty() {
-                                    param.push(' ');
-                                    param.push_str(&arg.name);
-                                }
-                            } else {
-                                param.push_str("void");
-                            }
-                            param
-                        })
-                        .collect();
-                    signature.push_str(&param_signatures.join(", "));
-                    signature.push(')');
-                }
-                
-                LanguageId::Java => {
-                    // Java: ReturnType name(Type1 param1, Type2 param2)
-                    if let Some(ref return_type) = func_decl.return_type {
-                        signature.push_str(&return_type.to_string());
-                        signature.push(' ');
-                    } else {
-                        signature.push_str("void ");
-                    }
-                    
-                    signature.push_str(symbol.name());
-                    signature.push('(');
-                    
-                    let param_signatures: Vec<String> = func_decl.args.iter()
-                        .map(|arg| {
-                            let mut param = String::new();
-                            if let Some(ref type_def) = arg.type_ {
-                                param.push_str(&type_def.to_string());
-                                if !arg.name.is_empty() {
-                                    param.push(' ');
-                                    param.push_str(&arg.name);
-                                }
-                            } else {
-                                param.push_str("Object");
-                            }
-                            param
-                        })
-                        .collect();
-                    signature.push_str(&param_signatures.join(", "));
-                    signature.push(')');
-                }
-                
-                LanguageId::Python => {
-                    // Python: def name(param1: Type1, param2: Type2) -> ReturnType:
-                    signature.push_str("def ");
-                    signature.push_str(symbol.name());
-                    signature.push('(');
-                    
-                    let param_signatures: Vec<String> = func_decl.args.iter()
-                        .map(|arg| {
-                            let mut param = String::new();
-                            param.push_str(&arg.name);
-                            if let Some(ref type_def) = arg.type_ {
-                                param.push_str(": ");
-                                param.push_str(&type_def.to_string());
-                            }
-                            param
-                        })
-                        .collect();
-                    signature.push_str(&param_signatures.join(", "));
-                    signature.push(')');
-                    
-                    if let Some(ref return_type) = func_decl.return_type {
-                        signature.push_str(" -> ");
-                        signature.push_str(&return_type.to_string());
-                    }
-                    signature.push(':');
-                }
-                
-                LanguageId::JavaScript | LanguageId::TypeScript | LanguageId::TypeScriptReact => {
-                    // JavaScript/TypeScript: function name(param1: Type1, param2: Type2): ReturnType
-                    signature.push_str("function ");
-                    signature.push_str(symbol.name());
-                    signature.push('(');
-                    
-                    let param_signatures: Vec<String> = func_decl.args.iter()
-                        .map(|arg| {
-                            let mut param = String::new();
-                            param.push_str(&arg.name);
-                            if let Some(ref type_def) = arg.type_ {
-                                param.push_str(": ");
-                                param.push_str(&type_def.to_string());
-                            }
-                            param
-                        })
-                        .collect();
-                    signature.push_str(&param_signatures.join(", "));
-                    signature.push(')');
-                    
-                    if let Some(ref return_type) = func_decl.return_type {
-                        signature.push_str(": ");
-                        signature.push_str(&return_type.to_string());
-                    }
-                }
-                
-                LanguageId::Go => {
-                    // Go: func name(param1 Type1, param2 Type2) ReturnType
-                    signature.push_str("func ");
-                    signature.push_str(symbol.name());
-                    signature.push('(');
-                    
-                    let param_signatures: Vec<String> = func_decl.args.iter()
-                        .map(|arg| {
-                            let mut param = String::new();
-                            param.push_str(&arg.name);
-                            if let Some(ref type_def) = arg.type_ {
-                                param.push(' ');
-                                param.push_str(&type_def.to_string());
-                            }
-                            param
-                        })
-                        .collect();
-                    signature.push_str(&param_signatures.join(", "));
-                    signature.push(')');
-                    
-                    if let Some(ref return_type) = func_decl.return_type {
-                        signature.push(' ');
-                        signature.push_str(&return_type.to_string());
-                    }
-                }
-                
-                _ => {
-                    // 通用格式：name(param1: Type1, param2: Type2) -> ReturnType
-                    signature.push_str(symbol.name());
-                    signature.push('(');
-                    
-                    let param_signatures: Vec<String> = func_decl.args.iter()
-                        .map(|arg| {
-                            let mut param = String::new();
-                            param.push_str(&arg.name);
-                            if let Some(ref type_def) = arg.type_ {
-                                param.push_str(": ");
-                                param.push_str(&type_def.to_string());
-                            }
-                            param
-                        })
-                        .collect();
-                    signature.push_str(&param_signatures.join(", "));
-                    signature.push(')');
-                    
-                    if let Some(ref return_type) = func_decl.return_type {
-                        signature.push_str(" -> ");
-                        signature.push_str(&return_type.to_string());
-                    }
+                if let Some(ref type_def) = arg.type_ {
+                    param.push_str(&self._safe_type_name(type_def));
+                } else {
+                    param.push_str("_");
                 }
             }
             
-            Some(signature)
-        } else {
-            None
+            crate::ast::treesitter::language_id::LanguageId::Cpp | 
+            crate::ast::treesitter::language_id::LanguageId::C => {
+                // C/C++: Type name
+                if let Some(ref type_def) = arg.type_ {
+                    param.push_str(&self._safe_type_name(type_def));
+                    if !arg.name.is_empty() {
+                        param.push(' ');
+                        param.push_str(&arg.name);
+                    }
+                } else {
+                    param.push_str("void");
+                }
+            }
+            
+            crate::ast::treesitter::language_id::LanguageId::Java => {
+                // Java: Type name
+                if let Some(ref type_def) = arg.type_ {
+                    param.push_str(&self._safe_type_name(type_def));
+                    if !arg.name.is_empty() {
+                        param.push(' ');
+                        param.push_str(&arg.name);
+                    }
+                } else {
+                    param.push_str("Object");
+                }
+            }
+            
+            crate::ast::treesitter::language_id::LanguageId::Python => {
+                // Python: name: Type
+                param.push_str(&arg.name);
+                if let Some(ref type_def) = arg.type_ {
+                    param.push_str(": ");
+                    param.push_str(&self._safe_type_name(type_def));
+                }
+            }
+            
+            crate::ast::treesitter::language_id::LanguageId::JavaScript | 
+            crate::ast::treesitter::language_id::LanguageId::TypeScript | 
+            crate::ast::treesitter::language_id::LanguageId::TypeScriptReact => {
+                // JavaScript/TypeScript: name: Type
+                param.push_str(&arg.name);
+                if let Some(ref type_def) = arg.type_ {
+                    param.push_str(": ");
+                    param.push_str(&self._safe_type_name(type_def));
+                }
+            }
+            
+            crate::ast::treesitter::language_id::LanguageId::Go => {
+                // Go: name Type
+                param.push_str(&arg.name);
+                if let Some(ref type_def) = arg.type_ {
+                    param.push(' ');
+                    param.push_str(&self._safe_type_name(type_def));
+                }
+            }
+            
+            _ => {
+                // 通用格式：name: Type
+                param.push_str(&arg.name);
+                if let Some(ref type_def) = arg.type_ {
+                    param.push_str(": ");
+                    param.push_str(&self._safe_type_name(type_def));
+                }
+            }
         }
+        
+        param
+    }
+
+    /// 构建模板参数字符串
+    fn _build_template_params(&self, template_types: &[crate::ast::treesitter::ast_instance_structs::TypeDef]) -> String {
+        if template_types.is_empty() {
+            return String::new();
+        }
+        
+        let template_names: Vec<String> = template_types.iter()
+            .filter_map(|t| t.name.as_ref())
+            .map(|name| name.to_string())
+            .collect();
+        
+        if template_names.is_empty() {
+            return String::new();
+        }
+        
+        format!("<{}>", template_names.join(", "))
+    }
+
+    /// 构建返回类型字符串
+    fn _build_return_type(&self, return_type: &Option<crate::ast::treesitter::ast_instance_structs::TypeDef>,
+                         language: &crate::ast::treesitter::language_id::LanguageId) -> String {
+        if let Some(ref type_def) = return_type {
+            match language {
+                crate::ast::treesitter::language_id::LanguageId::Rust => {
+                    format!(" -> {}", self._safe_type_name(type_def))
+                }
+                crate::ast::treesitter::language_id::LanguageId::Python => {
+                    format!(" -> {}", self._safe_type_name(type_def))
+                }
+                crate::ast::treesitter::language_id::LanguageId::JavaScript | 
+                crate::ast::treesitter::language_id::LanguageId::TypeScript | 
+                crate::ast::treesitter::language_id::LanguageId::TypeScriptReact => {
+                    format!(": {}", self._safe_type_name(type_def))
+                }
+                crate::ast::treesitter::language_id::LanguageId::Go => {
+                    format!(" {}", self._safe_type_name(type_def))
+                }
+                _ => {
+                    format!(" -> {}", self._safe_type_name(type_def))
+                }
+            }
+        } else {
+            String::new()
+        }
+    }
+
+    /// 验证函数声明的完整性
+    fn _validate_function_declaration(&self, func_decl: &crate::ast::treesitter::ast_instance_structs::FunctionDeclaration) -> bool {
+        // 检查函数名是否为空
+        if func_decl.ast_fields.name.is_empty() {
+            return false;
+        }
+        
+        // 检查参数是否有重复名称
+        let mut param_names = std::collections::HashSet::new();
+        for arg in &func_decl.args {
+            if !arg.name.is_empty() && !param_names.insert(&arg.name) {
+                // 发现重复的参数名
+                return false;
+            }
+        }
+        
+        true
+    }
+
+    /// 处理特殊字符和转义
+    fn _escape_identifier(&self, identifier: &str) -> String {
+        // 检查是否需要转义
+        let needs_escaping = identifier.chars().any(|c| {
+            !c.is_alphanumeric() && c != '_' && c != '-'
+        });
+        
+        if needs_escaping {
+            // 简单的转义处理，实际应用中可能需要更复杂的逻辑
+            identifier.replace("\"", "\\\"").replace("'", "\\'")
+        } else {
+            identifier.to_string()
+        }
+    }
+
+    /// 构建完整的函数签名（带错误处理）
+    fn _build_complete_signature(&self, symbol: &dyn crate::ast::treesitter::ast_instance_structs::AstSymbolInstance,
+                                func_decl: &crate::ast::treesitter::ast_instance_structs::FunctionDeclaration) -> String {
+        // 验证函数声明
+        if !self._validate_function_declaration(func_decl) {
+            warn!("Invalid function declaration for {}: validation failed", symbol.name());
+            return self._build_fallback_signature(symbol);
+        }
+        
+        let mut signature = String::new();
+        let language = symbol.language();
+        
+        // 添加命名空间前缀
+        signature.push_str(&self._build_namespace_prefix(symbol));
+        
+        // 添加函数修饰符
+        signature.push_str(&self._build_function_modifiers(symbol, language));
+        
+        // 添加函数关键字
+        match language {
+            crate::ast::treesitter::language_id::LanguageId::Rust => signature.push_str("fn "),
+            crate::ast::treesitter::language_id::LanguageId::Python => signature.push_str("def "),
+            crate::ast::treesitter::language_id::LanguageId::JavaScript | 
+            crate::ast::treesitter::language_id::LanguageId::TypeScript | 
+            crate::ast::treesitter::language_id::LanguageId::TypeScriptReact => signature.push_str("function "),
+            crate::ast::treesitter::language_id::LanguageId::Go => signature.push_str("func "),
+            _ => {}
+        }
+        
+        // 添加函数名
+        signature.push_str(&self._escape_identifier(symbol.name()));
+        
+        // 添加模板参数
+        let template_params = self._build_template_params(&func_decl.template_types);
+        if !template_params.is_empty() {
+            signature.push_str(&template_params);
+        }
+        
+        // 添加参数列表
+        signature.push('(');
+        
+        // 使用可变参数处理
+        let param_signatures = self._build_varargs_signature(&func_decl.args, language);
+        signature.push_str(&param_signatures);
+        
+        signature.push(')');
+        
+        // 添加返回类型
+        signature.push_str(&self._build_return_type(&func_decl.return_type, language));
+        
+        // 为Python添加冒号
+        if matches!(language, crate::ast::treesitter::language_id::LanguageId::Python) {
+            signature.push(':');
+        }
+        
+        signature
+    }
+
+    /// 构建后备签名（当验证失败时使用）
+    fn _build_fallback_signature(&self, symbol: &dyn crate::ast::treesitter::ast_instance_structs::AstSymbolInstance) -> String {
+        let mut signature = String::new();
+        
+        // 添加函数关键字
+        match symbol.language() {
+            crate::ast::treesitter::language_id::LanguageId::Rust => signature.push_str("fn "),
+            crate::ast::treesitter::language_id::LanguageId::Python => signature.push_str("def "),
+            crate::ast::treesitter::language_id::LanguageId::JavaScript | 
+            crate::ast::treesitter::language_id::LanguageId::TypeScript | 
+            crate::ast::treesitter::language_id::LanguageId::TypeScriptReact => signature.push_str("function "),
+            crate::ast::treesitter::language_id::LanguageId::Go => signature.push_str("func "),
+            _ => {}
+        }
+        
+        // 添加函数名
+        signature.push_str(&self._escape_identifier(symbol.name()));
+        signature.push_str("(...)");
+        
+        signature
+    }
+
+    /// 处理嵌套类型
+    fn _build_nested_type_signature(&self, type_def: &crate::ast::treesitter::ast_instance_structs::TypeDef) -> String {
+        let mut signature = self._safe_type_name(type_def);
+        
+        if !type_def.nested_types.is_empty() {
+            signature.push('<');
+            let nested_signatures: Vec<String> = type_def.nested_types.iter()
+                .map(|nested| self._build_nested_type_signature(nested))
+                .collect();
+            signature.push_str(&nested_signatures.join(", "));
+            signature.push('>');
+        }
+        
+        signature
+    }
+
+    /// 处理默认参数值
+    fn _build_param_with_default(&self, arg: &crate::ast::treesitter::ast_instance_structs::FunctionArg,
+                                language: &crate::ast::treesitter::language_id::LanguageId,
+                                default_value: Option<&str>) -> String {
+        let mut param = self._build_param_signature(arg, language);
+        
+        if let Some(default) = default_value {
+            match language {
+                crate::ast::treesitter::language_id::LanguageId::Python => {
+                    param.push_str(" = ");
+                    param.push_str(default);
+                }
+                crate::ast::treesitter::language_id::LanguageId::JavaScript | 
+                crate::ast::treesitter::language_id::LanguageId::TypeScript | 
+                crate::ast::treesitter::language_id::LanguageId::TypeScriptReact => {
+                    param.push_str(" = ");
+                    param.push_str(default);
+                }
+                _ => {
+                    // 其他语言可能不支持默认参数值，或者需要不同的语法
+                    param.push_str(" /* default: ");
+                    param.push_str(default);
+                    param.push_str(" */");
+                }
+            }
+        }
+        
+        param
+    }
+
+    /// 处理可变参数
+    fn _build_varargs_signature(&self, args: &[crate::ast::treesitter::ast_instance_structs::FunctionArg],
+                               language: &crate::ast::treesitter::language_id::LanguageId) -> String {
+        let mut param_signatures: Vec<String> = args.iter()
+            .map(|arg| self._build_param_signature(arg, language))
+            .collect();
+        
+        // 根据语言添加可变参数语法
+        match language {
+            crate::ast::treesitter::language_id::LanguageId::Python => {
+                if !param_signatures.is_empty() {
+                    param_signatures.push("*args".to_string());
+                    param_signatures.push("**kwargs".to_string());
+                }
+            }
+            crate::ast::treesitter::language_id::LanguageId::JavaScript | 
+            crate::ast::treesitter::language_id::LanguageId::TypeScript | 
+            crate::ast::treesitter::language_id::LanguageId::TypeScriptReact => {
+                if !param_signatures.is_empty() {
+                    param_signatures.push("...args".to_string());
+                }
+            }
+            crate::ast::treesitter::language_id::LanguageId::Rust => {
+                if !param_signatures.is_empty() {
+                    param_signatures.push("...".to_string());
+                }
+            }
+            _ => {}
+        }
+        
+        param_signatures.join(", ")
+    }
+
+    /// 处理函数修饰符
+    fn _build_function_modifiers(&self, symbol: &dyn crate::ast::treesitter::ast_instance_structs::AstSymbolInstance,
+                                language: &crate::ast::treesitter::language_id::LanguageId) -> String {
+        let mut modifiers = String::new();
+        
+        // 这里可以根据AST中的其他信息添加修饰符
+        // 比如 public, private, static, async 等
+        // 目前这是一个占位符实现
+        
+        match language {
+            crate::ast::treesitter::language_id::LanguageId::Java => {
+                // Java 可能有 public, private, static 等修饰符
+                modifiers.push_str("public ");
+            }
+            crate::ast::treesitter::language_id::LanguageId::Cpp => {
+                // C++ 可能有 virtual, static, const 等修饰符
+                modifiers.push_str("virtual ");
+            }
+            _ => {}
+        }
+        
+        modifiers
+    }
+
+    /// 处理命名空间
+    fn _build_namespace_prefix(&self, symbol: &dyn crate::ast::treesitter::ast_instance_structs::AstSymbolInstance) -> String {
+        let namespace = symbol.namespace();
+        if !namespace.is_empty() && namespace != "global" {
+            return format!("{}::", namespace);
+        }
+        String::new()
     }
 
     /// 提取返回类型
@@ -518,5 +698,336 @@ impl CodeParser {
 impl Default for CodeParser {
     fn default() -> Self {
         Self::new()
+    }
+} 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::treesitter::ast_instance_structs::{FunctionDeclaration, FunctionArg, TypeDef, AstSymbolFields};
+    use crate::ast::treesitter::language_id::LanguageId;
+    use crate::ast::treesitter::structs::SymbolType;
+    use std::path::PathBuf;
+    use uuid::Uuid;
+    use tree_sitter::Range;
+    use tree_sitter::Point;
+
+    // 创建一个模拟的AstSymbolInstance实现用于测试
+    struct MockFunctionSymbol {
+        fields: AstSymbolFields,
+        func_decl: FunctionDeclaration,
+    }
+
+    impl AstSymbolInstance for MockFunctionSymbol {
+        fn fields(&self) -> &AstSymbolFields {
+            &self.fields
+        }
+
+        fn fields_mut(&mut self) -> &mut AstSymbolFields {
+            &mut self.fields
+        }
+
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+
+        fn is_type(&self) -> bool {
+            false
+        }
+
+        fn is_declaration(&self) -> bool {
+            true
+        }
+
+        fn types(&self) -> Vec<TypeDef> {
+            let mut types = vec![];
+            if let Some(t) = self.func_decl.return_type.clone() {
+                types.push(t.clone());
+                types.extend(t.get_nested_types());
+            }
+            for t in self.func_decl.args.iter() {
+                if let Some(t) = t.type_.clone() {
+                    types.push(t.clone());
+                    types.extend(t.get_nested_types());
+                }
+            }
+            types
+        }
+
+        fn set_guids_to_types(&mut self, guids: &Vec<Option<Uuid>>) {
+            let mut idx = 0;
+            if let Some(t) = &mut self.func_decl.return_type {
+                t.guid = guids[idx].clone();
+                idx += 1;
+                t.mutate_nested_types(|t| {
+                    t.guid = guids[idx].clone();
+                    idx += 1;
+                })
+            }
+            for t in self.func_decl.args.iter_mut() {
+                if let Some(t) = &mut t.type_ {
+                    t.guid = guids[idx].clone();
+                    idx += 1;
+                    t.mutate_nested_types(|t| {
+                        t.guid = guids[idx].clone();
+                        idx += 1;
+                    })
+                }
+            }
+        }
+
+        fn set_inference_info_guids_to_types(&mut self, guids: &Vec<Option<Uuid>>) {
+            let mut idx = 0;
+            if let Some(t) = &mut self.func_decl.return_type {
+                t.inference_info_guid = guids[idx].clone();
+                idx += 1;
+                t.mutate_nested_types(|t| {
+                    t.inference_info_guid = guids[idx].clone();
+                    idx += 1;
+                })
+            }
+            for t in self.func_decl.args.iter_mut() {
+                if let Some(t) = &mut t.type_ {
+                    t.inference_info_guid = guids[idx].clone();
+                    idx += 1;
+                    t.mutate_nested_types(|t| {
+                        t.inference_info_guid = guids[idx].clone();
+                        idx += 1;
+                    })
+                }
+            }
+        }
+
+        fn temporary_types_cleanup(&mut self) {
+            if let Some(t) = &mut self.func_decl.return_type {
+                t.inference_info = None;
+                t.mutate_nested_types(|t| {
+                    t.inference_info = None
+                });
+            }
+            for t in self.func_decl.args.iter_mut() {
+                if let Some(t) = &mut t.type_ {
+                    t.inference_info = None;
+                    t.mutate_nested_types(|t| {
+                        t.inference_info = None
+                    });
+                }
+            }
+        }
+
+        fn symbol_type(&self) -> SymbolType {
+            SymbolType::FunctionDeclaration
+        }
+    }
+
+    fn create_mock_function(name: &str, language: LanguageId, args: Vec<FunctionArg>, return_type: Option<TypeDef>) -> MockFunctionSymbol {
+        let fields = AstSymbolFields {
+            guid: Uuid::new_v4(),
+            name: name.to_string(),
+            language,
+            file_path: PathBuf::from("test.rs"),
+            namespace: "test".to_string(),
+            parent_guid: None,
+            childs_guid: vec![],
+            full_range: Range {
+                start_point: Point { row: 0, column: 0 },
+                end_point: Point { row: 0, column: 0 },
+                start_byte: 0,
+                end_byte: 0,
+            },
+            declaration_range: Range {
+                start_point: Point { row: 0, column: 0 },
+                end_point: Point { row: 0, column: 0 },
+                start_byte: 0,
+                end_byte: 0,
+            },
+            definition_range: Range {
+                start_point: Point { row: 0, column: 0 },
+                end_point: Point { row: 0, column: 0 },
+                start_byte: 0,
+                end_byte: 0,
+            },
+            linked_decl_guid: None,
+            linked_decl_type: None,
+            caller_guid: None,
+            is_error: false,
+            caller_depth: None,
+        };
+
+        let func_decl = FunctionDeclaration {
+            ast_fields: fields.clone(),
+            template_types: vec![],
+            args,
+            return_type,
+        };
+
+        MockFunctionSymbol {
+            fields,
+            func_decl,
+        }
+    }
+
+    #[test]
+    fn test_rust_function_signature() {
+        let parser = CodeParser::new();
+        
+        let args = vec![
+            FunctionArg {
+                name: "x".to_string(),
+                type_: Some(TypeDef {
+                    name: Some("i32".to_string()),
+                    ..Default::default()
+                }),
+            },
+            FunctionArg {
+                name: "y".to_string(),
+                type_: Some(TypeDef {
+                    name: Some("String".to_string()),
+                    ..Default::default()
+                }),
+            },
+        ];
+
+        let return_type = Some(TypeDef {
+            name: Some("bool".to_string()),
+            ..Default::default()
+        });
+
+        let mock_symbol = create_mock_function("test_function", LanguageId::Rust, args, return_type);
+        
+        let signature = parser._extract_function_signature(&mock_symbol);
+        assert!(signature.is_some());
+        assert_eq!(signature.unwrap(), "fn test_function(x: i32, y: String) -> bool");
+    }
+
+    #[test]
+    fn test_python_function_signature() {
+        let parser = CodeParser::new();
+        
+        let args = vec![
+            FunctionArg {
+                name: "name".to_string(),
+                type_: Some(TypeDef {
+                    name: Some("str".to_string()),
+                    ..Default::default()
+                }),
+            },
+            FunctionArg {
+                name: "age".to_string(),
+                type_: Some(TypeDef {
+                    name: Some("int".to_string()),
+                    ..Default::default()
+                }),
+            },
+        ];
+
+        let return_type = Some(TypeDef {
+            name: Some("str".to_string()),
+            ..Default::default()
+        });
+
+        let mock_symbol = create_mock_function("greet", LanguageId::Python, args, return_type);
+        
+        let signature = parser._extract_function_signature(&mock_symbol);
+        assert!(signature.is_some());
+        assert_eq!(signature.unwrap(), "def greet(name: str, age: int) -> str:");
+    }
+
+    #[test]
+    fn test_function_with_template_params() {
+        let parser = CodeParser::new();
+        
+        let args = vec![
+            FunctionArg {
+                name: "value".to_string(),
+                type_: Some(TypeDef {
+                    name: Some("T".to_string()),
+                    ..Default::default()
+                }),
+            },
+        ];
+
+        let template_types = vec![
+            TypeDef {
+                name: Some("T".to_string()),
+                ..Default::default()
+            },
+        ];
+
+        let mut mock_symbol = create_mock_function("process", LanguageId::Rust, args, None);
+        mock_symbol.func_decl.template_types = template_types;
+        
+        let signature = parser._extract_function_signature(&mock_symbol);
+        assert!(signature.is_some());
+        assert_eq!(signature.unwrap(), "fn process<T>(value: T)");
+    }
+
+    #[test]
+    fn test_function_with_empty_args() {
+        let parser = CodeParser::new();
+        
+        let mock_symbol = create_mock_function("main", LanguageId::Rust, vec![], None);
+        
+        let signature = parser._extract_function_signature(&mock_symbol);
+        assert!(signature.is_some());
+        assert_eq!(signature.unwrap(), "fn main()");
+    }
+
+    #[test]
+    fn test_function_with_unknown_types() {
+        let parser = CodeParser::new();
+        
+        let args = vec![
+            FunctionArg {
+                name: "param".to_string(),
+                type_: None, // 未知类型
+            },
+        ];
+
+        let mock_symbol = create_mock_function("unknown", LanguageId::Rust, args, None);
+        
+        let signature = parser._extract_function_signature(&mock_symbol);
+        assert!(signature.is_some());
+        assert_eq!(signature.unwrap(), "fn unknown(param: _)");
+    }
+
+    #[test]
+    fn test_safe_type_name() {
+        let parser = CodeParser::new();
+        
+        // 测试有名称的类型
+        let type_def = TypeDef {
+            name: Some("String".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(parser._safe_type_name(&type_def), "String");
+        
+        // 测试只有推理信息的类型
+        let type_def = TypeDef {
+            name: None,
+            inference_info: Some("inferred_type".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(parser._safe_type_name(&type_def), "inferred_type");
+        
+        // 测试完全未知的类型
+        let type_def = TypeDef {
+            name: None,
+            inference_info: None,
+            ..Default::default()
+        };
+        assert_eq!(parser._safe_type_name(&type_def), "unknown");
+    }
+
+    #[test]
+    fn test_escape_identifier() {
+        let parser = CodeParser::new();
+        
+        // 测试普通标识符
+        assert_eq!(parser._escape_identifier("normal_name"), "normal_name");
+        
+        // 测试包含特殊字符的标识符
+        assert_eq!(parser._escape_identifier("name with spaces"), "name with spaces");
+        assert_eq!(parser._escape_identifier("name\"with\"quotes"), "name\\\"with\\\"quotes");
     }
 } 
