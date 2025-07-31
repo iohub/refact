@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::fs;
 use uuid::Uuid;
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 
 use crate::ast::treesitter::parsers::get_ast_parser_by_filename;
 use crate::ast::treesitter::ast_instance_structs::AstSymbolInstanceArc;
@@ -75,7 +75,7 @@ impl CodeParser {
         info!("Parsing file: {}", file_path.display());
         
         // 获取对应的解析器
-        let (mut parser, language_id) = get_ast_parser_by_filename(file_path)
+        let (mut parser, _language_id) = get_ast_parser_by_filename(file_path)
             .map_err(|e| format!("Failed to get parser for {}: {}", file_path.display(), e.message))?;
 
         // 读取文件内容
@@ -164,21 +164,270 @@ impl CodeParser {
     }
 
     /// 提取函数签名
-    fn _extract_function_signature(&self, _symbol: &dyn crate::ast::treesitter::ast_instance_structs::AstSymbolInstance) -> Option<String> {
-        // 这里可以根据不同语言实现具体的签名提取逻辑
-        None
+    fn _extract_function_signature(&self, symbol: &dyn crate::ast::treesitter::ast_instance_structs::AstSymbolInstance) -> Option<String> {
+        use crate::ast::treesitter::ast_instance_structs::FunctionDeclaration;
+        use crate::ast::treesitter::language_id::LanguageId;
+        
+        // 尝试将symbol转换为FunctionDeclaration
+        if let Some(func_decl) = symbol.as_any().downcast_ref::<FunctionDeclaration>() {
+            let mut signature = String::new();
+            
+            // 根据语言类型构建不同的签名格式
+            match symbol.language() {
+                LanguageId::Rust => {
+                    // Rust: fn name<T>(param1: Type1, param2: Type2) -> ReturnType
+                    signature.push_str("fn ");
+                    signature.push_str(symbol.name());
+                    
+                    // 添加模板参数
+                    if !func_decl.template_types.is_empty() {
+                        signature.push('<');
+                        let template_names: Vec<String> = func_decl.template_types.iter()
+                            .map(|t| t.to_string())
+                            .collect();
+                        signature.push_str(&template_names.join(", "));
+                        signature.push('>');
+                    }
+                    
+                    // 添加参数
+                    signature.push('(');
+                    let param_signatures: Vec<String> = func_decl.args.iter()
+                        .map(|arg| {
+                            let mut param = String::new();
+                            if !arg.name.is_empty() {
+                                param.push_str(&arg.name);
+                                param.push_str(": ");
+                            }
+                            if let Some(ref type_def) = arg.type_ {
+                                param.push_str(&type_def.to_string());
+                            } else {
+                                param.push_str("_");
+                            }
+                            param
+                        })
+                        .collect();
+                    signature.push_str(&param_signatures.join(", "));
+                    signature.push(')');
+                    
+                    // 添加返回类型
+                    if let Some(ref return_type) = func_decl.return_type {
+                        signature.push_str(" -> ");
+                        signature.push_str(&return_type.to_string());
+                    }
+                }
+                
+                LanguageId::Cpp | LanguageId::C => {
+                    // C/C++: ReturnType name<T>(Type1 param1, Type2 param2)
+                    if let Some(ref return_type) = func_decl.return_type {
+                        signature.push_str(&return_type.to_string());
+                        signature.push(' ');
+                    } else {
+                        signature.push_str("void ");
+                    }
+                    
+                    signature.push_str(symbol.name());
+                    
+                    // 添加模板参数
+                    if !func_decl.template_types.is_empty() {
+                        signature.push('<');
+                        let template_names: Vec<String> = func_decl.template_types.iter()
+                            .map(|t| t.to_string())
+                            .collect();
+                        signature.push_str(&template_names.join(", "));
+                        signature.push('>');
+                    }
+                    
+                    // 添加参数
+                    signature.push('(');
+                    let param_signatures: Vec<String> = func_decl.args.iter()
+                        .map(|arg| {
+                            let mut param = String::new();
+                            if let Some(ref type_def) = arg.type_ {
+                                param.push_str(&type_def.to_string());
+                                if !arg.name.is_empty() {
+                                    param.push(' ');
+                                    param.push_str(&arg.name);
+                                }
+                            } else {
+                                param.push_str("void");
+                            }
+                            param
+                        })
+                        .collect();
+                    signature.push_str(&param_signatures.join(", "));
+                    signature.push(')');
+                }
+                
+                LanguageId::Java => {
+                    // Java: ReturnType name(Type1 param1, Type2 param2)
+                    if let Some(ref return_type) = func_decl.return_type {
+                        signature.push_str(&return_type.to_string());
+                        signature.push(' ');
+                    } else {
+                        signature.push_str("void ");
+                    }
+                    
+                    signature.push_str(symbol.name());
+                    signature.push('(');
+                    
+                    let param_signatures: Vec<String> = func_decl.args.iter()
+                        .map(|arg| {
+                            let mut param = String::new();
+                            if let Some(ref type_def) = arg.type_ {
+                                param.push_str(&type_def.to_string());
+                                if !arg.name.is_empty() {
+                                    param.push(' ');
+                                    param.push_str(&arg.name);
+                                }
+                            } else {
+                                param.push_str("Object");
+                            }
+                            param
+                        })
+                        .collect();
+                    signature.push_str(&param_signatures.join(", "));
+                    signature.push(')');
+                }
+                
+                LanguageId::Python => {
+                    // Python: def name(param1: Type1, param2: Type2) -> ReturnType:
+                    signature.push_str("def ");
+                    signature.push_str(symbol.name());
+                    signature.push('(');
+                    
+                    let param_signatures: Vec<String> = func_decl.args.iter()
+                        .map(|arg| {
+                            let mut param = String::new();
+                            param.push_str(&arg.name);
+                            if let Some(ref type_def) = arg.type_ {
+                                param.push_str(": ");
+                                param.push_str(&type_def.to_string());
+                            }
+                            param
+                        })
+                        .collect();
+                    signature.push_str(&param_signatures.join(", "));
+                    signature.push(')');
+                    
+                    if let Some(ref return_type) = func_decl.return_type {
+                        signature.push_str(" -> ");
+                        signature.push_str(&return_type.to_string());
+                    }
+                    signature.push(':');
+                }
+                
+                LanguageId::JavaScript | LanguageId::TypeScript | LanguageId::TypeScriptReact => {
+                    // JavaScript/TypeScript: function name(param1: Type1, param2: Type2): ReturnType
+                    signature.push_str("function ");
+                    signature.push_str(symbol.name());
+                    signature.push('(');
+                    
+                    let param_signatures: Vec<String> = func_decl.args.iter()
+                        .map(|arg| {
+                            let mut param = String::new();
+                            param.push_str(&arg.name);
+                            if let Some(ref type_def) = arg.type_ {
+                                param.push_str(": ");
+                                param.push_str(&type_def.to_string());
+                            }
+                            param
+                        })
+                        .collect();
+                    signature.push_str(&param_signatures.join(", "));
+                    signature.push(')');
+                    
+                    if let Some(ref return_type) = func_decl.return_type {
+                        signature.push_str(": ");
+                        signature.push_str(&return_type.to_string());
+                    }
+                }
+                
+                LanguageId::Go => {
+                    // Go: func name(param1 Type1, param2 Type2) ReturnType
+                    signature.push_str("func ");
+                    signature.push_str(symbol.name());
+                    signature.push('(');
+                    
+                    let param_signatures: Vec<String> = func_decl.args.iter()
+                        .map(|arg| {
+                            let mut param = String::new();
+                            param.push_str(&arg.name);
+                            if let Some(ref type_def) = arg.type_ {
+                                param.push(' ');
+                                param.push_str(&type_def.to_string());
+                            }
+                            param
+                        })
+                        .collect();
+                    signature.push_str(&param_signatures.join(", "));
+                    signature.push(')');
+                    
+                    if let Some(ref return_type) = func_decl.return_type {
+                        signature.push(' ');
+                        signature.push_str(&return_type.to_string());
+                    }
+                }
+                
+                _ => {
+                    // 通用格式：name(param1: Type1, param2: Type2) -> ReturnType
+                    signature.push_str(symbol.name());
+                    signature.push('(');
+                    
+                    let param_signatures: Vec<String> = func_decl.args.iter()
+                        .map(|arg| {
+                            let mut param = String::new();
+                            param.push_str(&arg.name);
+                            if let Some(ref type_def) = arg.type_ {
+                                param.push_str(": ");
+                                param.push_str(&type_def.to_string());
+                            }
+                            param
+                        })
+                        .collect();
+                    signature.push_str(&param_signatures.join(", "));
+                    signature.push(')');
+                    
+                    if let Some(ref return_type) = func_decl.return_type {
+                        signature.push_str(" -> ");
+                        signature.push_str(&return_type.to_string());
+                    }
+                }
+            }
+            
+            Some(signature)
+        } else {
+            None
+        }
     }
 
     /// 提取返回类型
-    fn _extract_return_type(&self, _symbol: &dyn crate::ast::treesitter::ast_instance_structs::AstSymbolInstance) -> Option<String> {
-        // 这里可以根据不同语言实现具体的返回类型提取逻辑
-        None
+    fn _extract_return_type(&self, symbol: &dyn crate::ast::treesitter::ast_instance_structs::AstSymbolInstance) -> Option<String> {
+        use crate::ast::treesitter::ast_instance_structs::FunctionDeclaration;
+        
+        // 尝试将symbol转换为FunctionDeclaration
+        if let Some(func_decl) = symbol.as_any().downcast_ref::<FunctionDeclaration>() {
+            func_decl.return_type.as_ref().map(|t| t.to_string())
+        } else {
+            None
+        }
     }
 
     /// 提取参数信息
-    fn _extract_parameters(&self, _symbol: &dyn crate::ast::treesitter::ast_instance_structs::AstSymbolInstance) -> Vec<ParameterInfo> {
-        // 这里可以根据不同语言实现具体的参数提取逻辑
-        Vec::new()
+    fn _extract_parameters(&self, symbol: &dyn crate::ast::treesitter::ast_instance_structs::AstSymbolInstance) -> Vec<ParameterInfo> {
+        use crate::ast::treesitter::ast_instance_structs::FunctionDeclaration;
+        
+        // 尝试将symbol转换为FunctionDeclaration
+        if let Some(func_decl) = symbol.as_any().downcast_ref::<FunctionDeclaration>() {
+            func_decl.args.iter()
+                .map(|arg| ParameterInfo {
+                    name: arg.name.clone(),
+                    type_name: arg.type_.as_ref().map(|t| t.to_string()),
+                    default_value: None, // 目前AST中没有默认值信息，设为None
+                })
+                .collect()
+        } else {
+            Vec::new()
+        }
     }
 
     /// 构建完整的代码图
