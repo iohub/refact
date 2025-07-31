@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use std::fs;
 use uuid::Uuid;
 use tracing::{info, warn};
+use async_trait::async_trait;
+use serde;
 
 use crate::ast::treesitter::parsers::get_ast_parser_by_filename;
 use crate::ast::treesitter::ast_instance_structs::AstSymbolInstanceArc;
@@ -704,123 +706,17 @@ impl Default for CodeParser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::treesitter::ast_instance_structs::{FunctionDeclaration, FunctionArg, TypeDef, AstSymbolFields};
+    use crate::ast::treesitter::ast_instance_structs::{FunctionDeclaration, FunctionArg, TypeDef, AstSymbolFields, AstSymbolInstance};
     use crate::ast::treesitter::language_id::LanguageId;
     use crate::ast::treesitter::structs::SymbolType;
     use std::path::PathBuf;
+    use std::any::Any;
     use uuid::Uuid;
     use tree_sitter::Range;
     use tree_sitter::Point;
 
-    // 创建一个模拟的AstSymbolInstance实现用于测试
-    struct MockFunctionSymbol {
-        fields: AstSymbolFields,
-        func_decl: FunctionDeclaration,
-    }
-
-    impl AstSymbolInstance for MockFunctionSymbol {
-        fn fields(&self) -> &AstSymbolFields {
-            &self.fields
-        }
-
-        fn fields_mut(&mut self) -> &mut AstSymbolFields {
-            &mut self.fields
-        }
-
-        fn as_any_mut(&mut self) -> &mut dyn Any {
-            self
-        }
-
-        fn is_type(&self) -> bool {
-            false
-        }
-
-        fn is_declaration(&self) -> bool {
-            true
-        }
-
-        fn types(&self) -> Vec<TypeDef> {
-            let mut types = vec![];
-            if let Some(t) = self.func_decl.return_type.clone() {
-                types.push(t.clone());
-                types.extend(t.get_nested_types());
-            }
-            for t in self.func_decl.args.iter() {
-                if let Some(t) = t.type_.clone() {
-                    types.push(t.clone());
-                    types.extend(t.get_nested_types());
-                }
-            }
-            types
-        }
-
-        fn set_guids_to_types(&mut self, guids: &Vec<Option<Uuid>>) {
-            let mut idx = 0;
-            if let Some(t) = &mut self.func_decl.return_type {
-                t.guid = guids[idx].clone();
-                idx += 1;
-                t.mutate_nested_types(|t| {
-                    t.guid = guids[idx].clone();
-                    idx += 1;
-                })
-            }
-            for t in self.func_decl.args.iter_mut() {
-                if let Some(t) = &mut t.type_ {
-                    t.guid = guids[idx].clone();
-                    idx += 1;
-                    t.mutate_nested_types(|t| {
-                        t.guid = guids[idx].clone();
-                        idx += 1;
-                    })
-                }
-            }
-        }
-
-        fn set_inference_info_guids_to_types(&mut self, guids: &Vec<Option<Uuid>>) {
-            let mut idx = 0;
-            if let Some(t) = &mut self.func_decl.return_type {
-                t.inference_info_guid = guids[idx].clone();
-                idx += 1;
-                t.mutate_nested_types(|t| {
-                    t.inference_info_guid = guids[idx].clone();
-                    idx += 1;
-                })
-            }
-            for t in self.func_decl.args.iter_mut() {
-                if let Some(t) = &mut t.type_ {
-                    t.inference_info_guid = guids[idx].clone();
-                    idx += 1;
-                    t.mutate_nested_types(|t| {
-                        t.inference_info_guid = guids[idx].clone();
-                        idx += 1;
-                    })
-                }
-            }
-        }
-
-        fn temporary_types_cleanup(&mut self) {
-            if let Some(t) = &mut self.func_decl.return_type {
-                t.inference_info = None;
-                t.mutate_nested_types(|t| {
-                    t.inference_info = None
-                });
-            }
-            for t in self.func_decl.args.iter_mut() {
-                if let Some(t) = &mut t.type_ {
-                    t.inference_info = None;
-                    t.mutate_nested_types(|t| {
-                        t.inference_info = None
-                    });
-                }
-            }
-        }
-
-        fn symbol_type(&self) -> SymbolType {
-            SymbolType::FunctionDeclaration
-        }
-    }
-
-    fn create_mock_function(name: &str, language: LanguageId, args: Vec<FunctionArg>, return_type: Option<TypeDef>) -> MockFunctionSymbol {
+    // 创建一个简单的测试函数，直接使用FunctionDeclaration
+    fn create_test_function(name: &str, language: LanguageId, args: Vec<FunctionArg>, return_type: Option<TypeDef>) -> FunctionDeclaration {
         let fields = AstSymbolFields {
             guid: Uuid::new_v4(),
             name: name.to_string(),
@@ -854,17 +750,16 @@ mod tests {
             caller_depth: None,
         };
 
-        let func_decl = FunctionDeclaration {
-            ast_fields: fields.clone(),
+        FunctionDeclaration {
+            ast_fields: fields,
             template_types: vec![],
             args,
             return_type,
-        };
-
-        MockFunctionSymbol {
-            fields,
-            func_decl,
         }
+    }
+
+    fn create_mock_function(name: &str, language: LanguageId, args: Vec<FunctionArg>, return_type: Option<TypeDef>) -> FunctionDeclaration {
+        create_test_function(name, language, args, return_type)
     }
 
     #[test]
@@ -955,7 +850,7 @@ mod tests {
         ];
 
         let mut mock_symbol = create_mock_function("process", LanguageId::Rust, args, None);
-        mock_symbol.func_decl.template_types = template_types;
+        mock_symbol.template_types = template_types;
         
         let signature = parser._extract_function_signature(&mock_symbol);
         assert!(signature.is_some());
