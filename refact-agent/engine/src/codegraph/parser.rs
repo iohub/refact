@@ -3,13 +3,12 @@ use std::path::{Path, PathBuf};
 use std::fs;
 use uuid::Uuid;
 use tracing::{info, warn};
-use async_trait::async_trait;
-use serde;
+
 
 use crate::ast::treesitter::parsers::get_ast_parser_by_filename;
 use crate::ast::treesitter::ast_instance_structs::AstSymbolInstanceArc;
 use crate::ast::treesitter::structs::SymbolType;
-use crate::codegraph::types::{FunctionInfo, CallRelation, ParameterInfo};
+use crate::codegraph::types::{FunctionInfo, CallRelation, ParameterInfo, PetGraphCodeGraph};
 use crate::codegraph::CodeGraph;
 
 /// 代码解析器，负责解析源代码文件并提取函数调用关系
@@ -168,7 +167,7 @@ impl CodeParser {
     /// 提取函数签名
     fn _extract_function_signature(&self, symbol: &dyn crate::ast::treesitter::ast_instance_structs::AstSymbolInstance) -> Option<String> {
         use crate::ast::treesitter::ast_instance_structs::FunctionDeclaration;
-        use crate::ast::treesitter::language_id::LanguageId;
+
         
         // 首先检查是否为函数声明
         if symbol.symbol_type() != crate::ast::treesitter::structs::SymbolType::FunctionDeclaration {
@@ -550,7 +549,7 @@ impl CodeParser {
     }
 
     /// 处理函数修饰符
-    fn _build_function_modifiers(&self, symbol: &dyn crate::ast::treesitter::ast_instance_structs::AstSymbolInstance,
+    fn _build_function_modifiers(&self, _symbol: &dyn crate::ast::treesitter::ast_instance_structs::AstSymbolInstance,
                                 language: &crate::ast::treesitter::language_id::LanguageId) -> String {
         let mut modifiers = String::new();
         
@@ -641,6 +640,35 @@ impl CodeParser {
         Ok(code_graph)
     }
 
+    /// 构建基于petgraph的代码图
+    pub fn build_petgraph_code_graph(&mut self, dir: &Path) -> Result<PetGraphCodeGraph, String> {
+        // 1. 解析所有文件
+        self.parse_directory(dir)?;
+        
+        // 2. 构建petgraph代码图
+        let mut code_graph = PetGraphCodeGraph::new();
+        
+        // 3. 提取函数信息并直接添加到代码图
+        for (file_path, ast) in &self.file_asts {
+            for symbol in ast {
+                let symbol_guard = symbol.read();
+                
+                if symbol_guard.symbol_type() == SymbolType::FunctionDeclaration {
+                    let function_info = self._create_function_info(symbol_guard.as_ref(), file_path);
+                    code_graph.add_function(function_info);
+                }
+            }
+        }
+        
+        // 4. 分析调用关系
+        self._analyze_petgraph_call_relations(&mut code_graph);
+        
+        // 5. 更新统计信息
+        code_graph.update_stats();
+        
+        Ok(code_graph)
+    }
+
     /// 分析调用关系
     fn _analyze_call_relations(&self, code_graph: &mut CodeGraph) {
         for (_file_path, ast) in &self.file_asts {
@@ -687,6 +715,63 @@ impl CodeParser {
                             // 在循环外添加关系
                             for relation in relations_to_add {
                                 code_graph.add_call_relation(relation);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    /// 分析petgraph调用关系
+    fn _analyze_petgraph_call_relations(&self, code_graph: &mut PetGraphCodeGraph) {
+        for (_file_path, ast) in &self.file_asts {
+            let mut current_function_stack: Vec<Uuid> = Vec::new();
+
+            for symbol in ast {
+                let symbol_guard = symbol.read();
+                
+                match symbol_guard.symbol_type() {
+                    SymbolType::FunctionDeclaration => {
+                        // 找到当前函数
+                        let function_name = symbol_guard.name();
+                        if let Some(function_info) = code_graph.find_functions_by_name(function_name).first() {
+                            current_function_stack.push(function_info.id);
+                        }
+                    }
+                    SymbolType::FunctionCall => {
+                        if let Some(caller_id) = current_function_stack.last() {
+                            let callee_name = symbol_guard.name();
+                            
+                            // 查找被调用的函数
+                            let callee_functions = code_graph.find_functions_by_name(callee_name);
+                            
+                            // 收集所有需要添加的关系
+                            let mut relations_to_add = Vec::new();
+                            
+                            if let Some(caller_info) = code_graph.get_function_by_id(caller_id) {
+                                for callee_info in callee_functions {
+                                    let relation = CallRelation {
+                                        caller_id: *caller_id,
+                                        callee_id: callee_info.id,
+                                        caller_name: caller_info.name.clone(),
+                                        callee_name: callee_info.name.clone(),
+                                        caller_file: caller_info.file_path.clone(),
+                                        callee_file: callee_info.file_path.clone(),
+                                        line_number: symbol_guard.full_range().start_point.row + 1,
+                                        is_resolved: true,
+                                    };
+                                    
+                                    relations_to_add.push(relation);
+                                }
+                            }
+                            
+                            // 在循环外添加关系
+                            for relation in relations_to_add {
+                                if let Err(e) = code_graph.add_call_relation(relation) {
+                                    warn!("Failed to add call relation: {}", e);
+                                }
                             }
                         }
                     }

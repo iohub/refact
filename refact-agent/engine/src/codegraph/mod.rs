@@ -3,7 +3,8 @@ pub mod graph;
 pub mod parser;
 pub mod types;
 pub mod tests;
+pub mod petgraph_storage;
 
-pub use analyzer::CodeGraphAnalyzer;
 pub use graph::CodeGraph;
-pub use types::{CallRelation, FunctionInfo, GraphNode, GraphRelation}; 
+pub use types::{CallRelation, FunctionInfo, GraphNode, GraphRelation, PetGraphCodeGraph};
+pub use petgraph_storage::{PetGraphStorage, PetGraphStorageManager}; 
