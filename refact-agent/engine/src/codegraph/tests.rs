@@ -7,8 +7,8 @@ mod tests {
     use tempfile::TempDir;
 
     use crate::codegraph::{
-        CodeGraphAnalyzer, CodeGraph, FunctionInfo, CallRelation,
-        types::{RelationType, CodeGraphStats, ParameterInfo}
+        analyzer::CodeGraphAnalyzer, CodeGraph, FunctionInfo, CallRelation,
+        types::{CodeGraphStats, ParameterInfo}
     };
 
     /// 创建测试用的临时目录和文件
