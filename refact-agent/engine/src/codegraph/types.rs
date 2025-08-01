@@ -94,7 +94,7 @@ impl Default for CodeGraphStats {
 
 /// 基于petgraph的代码图结构
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PetGraphCodeGraph {
+pub struct PetCodeGraph {
     /// petgraph有向图
     pub graph: DiGraph<FunctionInfo, CallRelation>,
     /// 函数ID -> 节点索引映射
@@ -109,7 +109,7 @@ pub struct PetGraphCodeGraph {
     pub stats: CodeGraphStats,
 }
 
-impl PetGraphCodeGraph {
+impl PetCodeGraph {
     pub fn new() -> Self {
         Self {
             graph: DiGraph::new(),
@@ -379,7 +379,7 @@ impl PetGraphCodeGraph {
     }
 }
 
-impl Default for PetGraphCodeGraph {
+impl Default for PetCodeGraph {
     fn default() -> Self {
         Self::new()
     }

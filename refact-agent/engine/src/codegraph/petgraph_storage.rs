@@ -4,7 +4,7 @@ use std::fs;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::codegraph::types::{PetGraphCodeGraph, FunctionInfo, CallRelation, CodeGraphStats};
+use crate::codegraph::types::{PetCodeGraph, FunctionInfo, CallRelation, CodeGraphStats};
 
 /// petgraph代码图存储格式
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,8 +22,8 @@ pub struct PetGraphStorage {
 }
 
 impl PetGraphStorage {
-    /// 从PetGraphCodeGraph创建存储格式
-    pub fn from_petgraph(code_graph: &PetGraphCodeGraph) -> Self {
+    /// 从PetCodeGraph创建存储格式
+    pub fn from_petgraph(code_graph: &PetCodeGraph) -> Self {
         let functions: Vec<FunctionInfo> = code_graph.get_all_functions().into_iter().cloned().collect();
         let call_relations: Vec<CallRelation> = code_graph.get_all_call_relations().into_iter().cloned().collect();
         
@@ -36,9 +36,9 @@ impl PetGraphStorage {
         }
     }
 
-    /// 转换为PetGraphCodeGraph
-    pub fn to_petgraph(&self) -> PetGraphCodeGraph {
-        let mut code_graph = PetGraphCodeGraph::new();
+    /// 转换为PetCodeGraph
+    pub fn to_petgraph(&self) -> PetCodeGraph {
+        let mut code_graph = PetCodeGraph::new();
         
         // 添加所有函数
         for function in &self.functions {
@@ -66,7 +66,7 @@ pub struct PetGraphStorageManager;
 
 impl PetGraphStorageManager {
     /// 保存代码图到文件
-    pub fn save_to_file(code_graph: &PetGraphCodeGraph, file_path: &Path) -> Result<(), String> {
+    pub fn save_to_file(code_graph: &PetCodeGraph, file_path: &Path) -> Result<(), String> {
         let storage = PetGraphStorage::from_petgraph(code_graph);
         let json = serde_json::to_string_pretty(&storage)
             .map_err(|e| format!("Failed to serialize code graph: {}", e))?;
@@ -78,7 +78,7 @@ impl PetGraphStorageManager {
     }
 
     /// 从文件加载代码图
-    pub fn load_from_file(file_path: &Path) -> Result<PetGraphCodeGraph, String> {
+    pub fn load_from_file(file_path: &Path) -> Result<PetCodeGraph, String> {
         let json = fs::read_to_string(file_path)
             .map_err(|e| format!("Failed to read file {}: {}", file_path.display(), e))?;
         
@@ -89,14 +89,14 @@ impl PetGraphStorageManager {
     }
 
     /// 保存代码图到JSON字符串
-    pub fn save_to_json(code_graph: &PetGraphCodeGraph) -> Result<String, String> {
+    pub fn save_to_json(code_graph: &PetCodeGraph) -> Result<String, String> {
         let storage = PetGraphStorage::from_petgraph(code_graph);
         serde_json::to_string_pretty(&storage)
             .map_err(|e| format!("Failed to serialize code graph: {}", e))
     }
 
     /// 从JSON字符串加载代码图
-    pub fn load_from_json(json_str: &str) -> Result<PetGraphCodeGraph, String> {
+    pub fn load_from_json(json_str: &str) -> Result<PetCodeGraph, String> {
         let storage: PetGraphStorage = serde_json::from_str(json_str)
             .map_err(|e| format!("Failed to deserialize code graph: {}", e))?;
         
@@ -104,7 +104,7 @@ impl PetGraphStorageManager {
     }
 
     /// 保存代码图为二进制格式
-    pub fn save_to_binary(code_graph: &PetGraphCodeGraph, file_path: &Path) -> Result<(), String> {
+    pub fn save_to_binary(code_graph: &PetCodeGraph, file_path: &Path) -> Result<(), String> {
         let storage = PetGraphStorage::from_petgraph(code_graph);
         let binary = bincode::serialize(&storage)
             .map_err(|e| format!("Failed to serialize code graph: {}", e))?;
@@ -116,7 +116,7 @@ impl PetGraphStorageManager {
     }
 
     /// 从二进制文件加载代码图
-    pub fn load_from_binary(file_path: &Path) -> Result<PetGraphCodeGraph, String> {
+    pub fn load_from_binary(file_path: &Path) -> Result<PetCodeGraph, String> {
         let binary = fs::read(file_path)
             .map_err(|e| format!("Failed to read file {}: {}", file_path.display(), e))?;
         
@@ -127,7 +127,7 @@ impl PetGraphStorageManager {
     }
 
     /// 导出为GraphML格式（用于可视化工具）
-    pub fn export_to_graphml(code_graph: &PetGraphCodeGraph, file_path: &Path) -> Result<(), String> {
+    pub fn export_to_graphml(code_graph: &PetCodeGraph, file_path: &Path) -> Result<(), String> {
         let mut graphml = String::new();
         graphml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         graphml.push_str("<graphml xmlns=\"http://graphml.graphdrawing.org/xmlns\">\n");
@@ -177,7 +177,7 @@ impl PetGraphStorageManager {
     }
 
     /// 导出为GEXF格式（用于Gephi等工具）
-    pub fn export_to_gexf(code_graph: &PetGraphCodeGraph, file_path: &Path) -> Result<(), String> {
+    pub fn export_to_gexf(code_graph: &PetCodeGraph, file_path: &Path) -> Result<(), String> {
         let mut gexf = String::new();
         gexf.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         gexf.push_str("<gexf xmlns=\"http://www.gexf.net/1.3\" version=\"1.3\">\n");
@@ -252,7 +252,7 @@ mod tests {
 
     #[test]
     fn test_storage_roundtrip() {
-        let mut code_graph = PetGraphCodeGraph::new();
+        let mut code_graph = PetCodeGraph::new();
         
         // 添加测试函数
         let function1 = FunctionInfo {
@@ -308,7 +308,7 @@ mod tests {
 
     #[test]
     fn test_json_roundtrip() {
-        let mut code_graph = PetGraphCodeGraph::new();
+        let mut code_graph = PetCodeGraph::new();
         
         let function = FunctionInfo {
             id: Uuid::new_v4(),

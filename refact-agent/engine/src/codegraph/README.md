@@ -15,7 +15,7 @@ This module provides code graph functionality using the PetGraph library for eff
 ### Basic Usage
 
 ```rust
-use crate::codegraph::{CodeParser, PetGraphCodeGraph, PetGraphStorageManager};
+use crate::codegraph::{CodeParser, PetCodeGraph, PetGraphStorageManager};
 use std::path::Path;
 
 // Create a code parser
@@ -131,12 +131,12 @@ let loaded_graph = PetGraphStorageManager::load_from_binary(Path::new("codegraph
 
 ## Data Structures
 
-### PetGraphCodeGraph
+### PetCodeGraph
 
 The main graph structure that wraps PetGraph's `DiGraph`:
 
 ```rust
-pub struct PetGraphCodeGraph {
+pub struct PetCodeGraph {
     pub graph: DiGraph<FunctionInfo, CallRelation>,
     pub function_to_node: HashMap<Uuid, NodeIndex>,
     pub node_to_function: HashMap<NodeIndex, Uuid>,
@@ -203,7 +203,7 @@ Using PetGraph provides several performance benefits:
 
 ## Comparison with Original CodeGraph
 
-| Feature | Original CodeGraph | PetGraphCodeGraph |
+| Feature | Original CodeGraph | PetCodeGraph |
 |---------|-------------------|-------------------|
 | Graph Structure | HashMap + Vec | PetGraph DiGraph |
 | Node Access | O(1) HashMap lookup | O(1) direct access |
@@ -215,9 +215,9 @@ Using PetGraph provides several performance benefits:
 
 ## Migration from Original CodeGraph
 
-To migrate from the original `CodeGraph` to `PetGraphCodeGraph`:
+To migrate from the original `CodeGraph` to `PetCodeGraph`:
 
-1. Replace `CodeGraph::new()` with `PetGraphCodeGraph::new()`
+1. Replace `CodeGraph::new()` with `PetCodeGraph::new()`
 2. Use `build_petgraph_code_graph()` instead of `build_code_graph()`
 3. Update method calls to use the new API
 4. Take advantage of new graph analysis features

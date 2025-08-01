@@ -8,7 +8,7 @@ use tracing::{info, warn};
 use crate::ast::treesitter::parsers::get_ast_parser_by_filename;
 use crate::ast::treesitter::ast_instance_structs::AstSymbolInstanceArc;
 use crate::ast::treesitter::structs::SymbolType;
-use crate::codegraph::types::{FunctionInfo, CallRelation, ParameterInfo, PetGraphCodeGraph};
+use crate::codegraph::types::{FunctionInfo, CallRelation, ParameterInfo, PetCodeGraph};
 use crate::codegraph::CodeGraph;
 
 /// 代码解析器，负责解析源代码文件并提取函数调用关系
@@ -641,12 +641,12 @@ impl CodeParser {
     }
 
     /// 构建基于petgraph的代码图
-    pub fn build_petgraph_code_graph(&mut self, dir: &Path) -> Result<PetGraphCodeGraph, String> {
+    pub fn build_petgraph_code_graph(&mut self, dir: &Path) -> Result<PetCodeGraph, String> {
         // 1. 解析所有文件
         self.parse_directory(dir)?;
         
         // 2. 构建petgraph代码图
-        let mut code_graph = PetGraphCodeGraph::new();
+        let mut code_graph = PetCodeGraph::new();
         
         // 3. 提取函数信息并直接添加到代码图
         for (file_path, ast) in &self.file_asts {
@@ -725,7 +725,7 @@ impl CodeParser {
     }
 
     /// 分析petgraph调用关系
-    fn _analyze_petgraph_call_relations(&self, code_graph: &mut PetGraphCodeGraph) {
+    fn _analyze_petgraph_call_relations(&self, code_graph: &mut PetCodeGraph) {
         for (_file_path, ast) in &self.file_asts {
             let mut current_function_stack: Vec<Uuid> = Vec::new();
 
